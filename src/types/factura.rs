@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use rocket::serde::{Deserialize};
+use rocket::serde::Deserialize;
 use crate::types::factura_producto::FacturaProduct;
 use crate::types::cliente::Cliente;
 use crate::aux_func::time_serde;
@@ -7,19 +7,28 @@ use crate::aux_func::time_serde;
 #[derive(Deserialize, Debug)]
 #[serde(crate = "rocket::serde")]
 pub struct Factura {
-	pub id					:String,
+	pub id_front    :String,
 	pub cliente			:Cliente,
-	pub tipo_fac		:i8,
-	pub punto_venta	:i16,
-	pub numero			:i32,
-	//#[serde(deserialize_with = "deserialize_datetime_utc")]
+	pub tipo_fac		:i32,
+	pub punto_venta	:i32,
+	pub numero			:i64,
 	#[serde(with = "time_serde")]
 	pub fecha				:DateTime<Utc>,
-	pub cae					:i32,
+	pub cae					:i64,
 	#[serde(with = "time_serde")]
 	pub venc_cae		:DateTime<Utc>,
-	pub medio_pago	:String,
+	pub id_medio_pago	:i32,
 	pub productos   :Vec<FacturaProduct>
+}
+
+impl Factura {
+	pub fn total(&self) -> f64 {
+		let mut retorno = 0.0;
+		for i in self.productos {
+			retorno += i.valor;
+		}
+		return retorno;
+	}
 }
 
 

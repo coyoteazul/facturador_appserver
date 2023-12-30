@@ -1,5 +1,4 @@
 pub mod wsfev1;
-pub mod dummy;
+mod soap_utils;
 
-mod soap_util;//este no se usa
-mod utils_soap;
+pub use soap_utils::afip_signin::afip_signin;

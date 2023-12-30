@@ -16,3 +16,8 @@ yaserde_derive = "*"
 log = "*"
 async-trait = "0.1.75"
 thiserror = "1.0.23"
+openssl = { version = "0.10.62", features = ["vendored"] }
+lazy_static = "1.4.0"
+printers = "2.0.0"
+recibo = { version = "0.3.0", features = ["graphics"] }
+

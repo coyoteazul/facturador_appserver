@@ -1,26 +1,15 @@
-use chrono::format::parse;
-use reqwest::{Client, header::CONTENT_TYPE};
+use reqwest::Client;
 use yaserde_derive::{YaSerialize,YaDeserialize};
 use yaserde;
 
-pub async fn afip_dummy(req_cli: &Client) -> Result<FEDummyResult, reqwest::Error>{
-	
+use crate::model::afip::soap_utils::afip_post;
 
-	let url = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx?op=FEDummy";
-	let request = req_cli.post(url)
-	.header(CONTENT_TYPE, "application/soap+xml")
-	.body(
-		"<?xml version=\"1.0\" encoding=\"utf-8\"?>
-		<soap12:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap12=\"http://www.w3.org/2003/05/soap-envelope\">
-			<soap12:Body>
-				<FEDummy xmlns=\"http://ar.gov.afip.dif.FEV1/\" />
-			</soap12:Body>
-		</soap12:Envelope>")
-	.send().await?;
+pub async fn afip_dummy(
+	req_cli: &Client
+) -> Result<FEDummyResult, reqwest::Error>{
+	let xml_body = afip_post(req_cli, false, "FEDummy","", false, None).await?;
 
-	let response = request.text().await?;
-	let cropped = crop_xml_declaration(&response);
-	let parsed:Result<FedummyResponse, ()> = yaserde::de::from_str(&cropped).map_err(|e| {
+	let parsed:Result<FedummyResponse, ()> = yaserde::de::from_str(&xml_body).map_err(|e| {
 		println!("Deserialization error: {:?}", e);
 	});
 	let after_parse:FedummyResponse;
@@ -28,6 +17,7 @@ pub async fn afip_dummy(req_cli: &Client) -> Result<FEDummyResult, reqwest::Erro
 	match parsed {
 		Ok(a) => {
 			after_parse = a;
+			println!("parsed:{:?}",after_parse);
 		}
 		Err(e) => {
 			println!("parsed err:{:?}",e);
@@ -36,12 +26,7 @@ pub async fn afip_dummy(req_cli: &Client) -> Result<FEDummyResult, reqwest::Erro
 
 	}
 
-	
-	println!("parsed:{:?}",after_parse);
-
-	return Ok(response);
-
-
+	return Ok(after_parse.fe_dummy_result);
 }
 
 

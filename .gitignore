@@ -1,1 +1,3 @@
 /target
+src\assets\wsfev1.wsdl
+src\assets\zeep_wsfev1.rs
