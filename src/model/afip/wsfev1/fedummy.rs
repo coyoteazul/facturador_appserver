@@ -2,31 +2,31 @@ use reqwest::Client;
 use yaserde_derive::{YaSerialize,YaDeserialize};
 use yaserde;
 
-use crate::model::afip::soap_utils::afip_post;
+use crate::{model::afip::{soap_utils::{afip_post, get_xml_tag}, wsfev1::constants::*}, CONF};
 
 pub async fn afip_dummy(
 	req_cli: &Client
 ) -> Result<FEDummyResult, reqwest::Error>{
-	let xml_body = afip_post(req_cli, false, "FEDummy","", false, None).await?;
+	let url = if CONF.is_prd() {WSFEV1_PRD} else {WSFEV1_VAL};
+  const XML_BODY:&str = 
+	"<soap:Envelope 
+			xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" 
+			xmlns:ar=\"http://ar.gov.afip.dif.FEV1/\">
+		<soap:Header/>
+		<soap:Body>
+			<ar:FEDummy/>
+		</soap:Body>
+	</soap:Envelope>";
 
-	let parsed:Result<FedummyResponse, ()> = yaserde::de::from_str(&xml_body).map_err(|e| {
+
+	let respuesta = afip_post(req_cli, url,XML_BODY.to_string()).await?;
+
+	let parsed:FedummyResponse = yaserde::de::from_str(&get_xml_tag(&respuesta, "soap:Body") )
+	.map_err(|e| {
 		println!("Deserialization error: {:?}", e);
-	});
-	let after_parse:FedummyResponse;
-
-	match parsed {
-		Ok(a) => {
-			after_parse = a;
-			println!("parsed:{:?}",after_parse);
-		}
-		Err(e) => {
-			println!("parsed err:{:?}",e);
-			after_parse = FedummyResponse{ fe_dummy_result: todo!() };
-		}
-
-	}
-
-	return Ok(after_parse.fe_dummy_result);
+	}).unwrap();
+	
+	return Ok(parsed.fe_dummy_result);
 }
 
 

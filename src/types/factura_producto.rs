@@ -1,6 +1,6 @@
-use rocket::serde::Deserialize;
+use rocket::serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug,Serialize)]
 #[serde(crate = "rocket::serde")]
 pub struct FacturaProduct {
 	pub item_num:i32,

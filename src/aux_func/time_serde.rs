@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc, NaiveDateTime, Local};
+use chrono::{DateTime, Utc, Local};
 use rocket::serde::{Deserialize, Serializer, Deserializer, de};
 
 const FORMAT: &'static str = "%Y-%m-%d %H:%M:%S%:z";
@@ -40,8 +40,8 @@ where
 		//Ok(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
 }
 
-pub fn date_to_YYYYMMDD(
+pub fn date_to_yyyymmdd(
 	fecha:DateTime<Utc>
 ) -> String {
-	return format!("{}",fecha.with_timezone(Local).format("%Y%m%d"));
+	return format!("{}",fecha.with_timezone(&Local).format("%Y%m%d"));
 }

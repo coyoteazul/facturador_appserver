@@ -1,45 +1,81 @@
-use reqwest::Client;
+use std::str::FromStr;
+
+use chrono::{Local, NaiveDate, DateTime, Utc, NaiveDateTime};
+use reqwest::{Client, Error};
+use rocket_db_pools::Connection;
 use yaserde_derive::{YaSerialize,YaDeserialize};
 use yaserde;
-use crate::aux_func::time_serde::date_to_YYYYMMDD;
-use crate::{model::afip::soap_utils::afip_post, types::Factura};
+use crate::{Db, CONF};
+use crate::aux_func::time_serde::date_to_yyyymmdd;
+use crate::model::afip::soap_utils::get_xml_tag;
+use crate::model::propio::factura::{db_factura_transmision, OPERACION::ENVIO, OPERACION::RESPUESTA};
+use crate::{model::afip::soap_utils::{afip_post, afip_signin}, types::Factura};
 use crate::types::Cliente;
+use rand::Rng;
+use super::constants::*;
 
-pub async fn afip_FECAESolicitar(
-	req_cli: &Client
-) -> Result<FEDummyResult, reqwest::Error>{
-	let xml_body = afip_post(
-		req_cli, 
-		false,
-		"FEDummy",
-		"",
-		false,
-		None).await?;
+/** Ingresa a afip, registra el intento de transmision y luego transmite a afip
+ * Modifica la factura, agregandole cae y venc_cae
+ */
+pub async fn afip_fe_cae_solicitar(
+	req_cli: &Client,
+	factura: &mut Factura,
+	db: &mut Connection<Db>,
+	mut err_msg: &String
+) -> Result<bool, Error>{
+	let id_transmision = rand::thread_rng().gen_range(1..=100000);
+	let url = if CONF.is_prd() {WSFEV1_PRD} else {WSFEV1_VAL};
 
-	let parsed:Result<FecaesolicitarResponse, ()> = yaserde::de::from_str(&xml_body).map_err(|e| {
-		println!("Deserialization error: {:?}", e);
-	});
-	let after_parse:FecaesolicitarResponse;
+	let auth = afip_signin(req_cli, "WSFE").await;
+	let soap_msg = factura_to_soap(factura,auth);
+	let _ = db_factura_transmision(db, factura.id_factura,id_transmision, ENVIO, &soap_msg).await;
+
+	let respuesta = afip_post(req_cli, url,soap_msg).await?;
+	let _ = db_factura_transmision(db, factura.id_factura,id_transmision, RESPUESTA, &respuesta).await;
+
+	let body = get_xml_tag(&respuesta, "soap:Body");
+	let parsed:Result<FecaesolicitarResponse, ()> = 
+		yaserde::de::from_str(&body).map_err(|e| {
+			println!("Deserialization error: {:?}", e);
+		});
 
 	match parsed {
 		Ok(a) => {
-			after_parse = a;
-			println!("parsed:{:?}",after_parse);
+			println!("parsed ok:{:?}",a);
+			let result = a.fecae_solicitar_result.unwrap();
+
+			match result.errors {
+				Some(afip_err) => {
+					println!("afip_err:{:?}",afip_err);
+					err_msg = &mut format!("afip_err:{:?}",afip_err);
+					return Ok(false);
+				}
+				None => {
+					let d2 = result.fe_det_resp.unwrap();
+					let d3 = d2.fecae_det_response.get(0).unwrap();
+					let venci_str = d3.cae_fch_vto.as_ref().unwrap();
+					let venci = NaiveDateTime::parse_from_str(&venci_str,"%Y%m%d").unwrap().and_local_timezone(Local).single().unwrap();
+					factura.cae = d3.cae.as_ref().unwrap().parse().unwrap();
+					factura.venc_cae = venci.with_timezone(&Utc);
+				}
+
+			}			
 		}
 		Err(e) => {
+			err_msg = &mut format!("parsed err:{:?}",e);
 			println!("parsed err:{:?}",e);
-			after_parse = FedummyResponse{ fe_dummy_result: todo!() };
+			return Ok(false);
 		}
 
 	}
 
-	
-
-	return Ok(after_parse.fe_dummy_result);
+	return Ok(true);
 }
 
-fn factura_to_soap(factura: &Factura, auth:String) {
-	let retorno = Fecaesolicitar {
+fn factura_to_soap(
+	factura: &Factura, auth:String
+) -> String {
+	let body = Fecaesolicitar {
     auth,
     fe_cae_req: Some(Fecaerequest{
         fe_cab_req: Some(FecaecabRequest{
@@ -58,7 +94,7 @@ fn factura_to_soap(factura: &Factura, auth:String) {
 									doc_nro: 				factura.cliente.num_doc, 
 									cbte_desde: 		factura.numero,
 									cbte_hasta: 		factura.numero,
-									cbte_fch: 			Some(date_to_YYYYMMDD(factura.fecha)), 
+									cbte_fch: 			Some(date_to_yyyymmdd(factura.fecha)), 
 									imp_total: 			factura.total(),
 									imp_tot_conc: 	0.0, //para tipo C tiene que ser cero
 									imp_neto:	 			factura.total(), //para tipo C, este es el subtotal
@@ -85,6 +121,18 @@ fn factura_to_soap(factura: &Factura, auth:String) {
     }),
 
 	};
+
+	return format!(
+		"<soap:Envelope 
+			xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" 
+			xmlns:ar=\"http://ar.gov.afip.dif.FEV1/\">
+			<soap:Header/>
+			<soap:Body>
+				{}
+			</soap:Body>
+			</soap:Envelope>",
+			yaserde::ser::to_string(&body).expect("Failed to serialize to XML")
+		);
 }
 
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]

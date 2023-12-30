@@ -20,4 +20,6 @@ openssl = { version = "0.10.62", features = ["vendored"] }
 lazy_static = "1.4.0"
 printers = "2.0.0"
 recibo = { version = "0.3.0", features = ["graphics"] }
+rand = "0.8.5"
+config = "0.13.4"
 
