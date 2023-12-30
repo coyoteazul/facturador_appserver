@@ -4,8 +4,8 @@ mod aux_func;
 mod model;
 mod conf;
 mod init_check;
-use core::panic;
-use std::env;
+
+
 
 use init_check::init_check;
 use lazy_static::lazy_static;
@@ -14,7 +14,7 @@ use rocket_db_pools::{sqlx, Database};
 use rocket::{launch, routes};
 use conf::Conf;
 
-use crate::model::afip::wsfev1::afip_dummy;
+
 
 lazy_static! {
 	//static ref Conf: RwLock<Conf> = RwLock::new(Conf::new());

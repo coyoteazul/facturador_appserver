@@ -1,5 +1,5 @@
-use std::{sync::Arc, collections::HashMap, ops::Add, env};
-use rocket::tokio::sync::{Mutex, RwLock};
+use std::{collections::HashMap, ops::Add};
+use rocket::tokio::sync::{RwLock};
 
 use chrono::{Duration, DateTime, Local};
 use reqwest::{header::CONTENT_TYPE, Client};

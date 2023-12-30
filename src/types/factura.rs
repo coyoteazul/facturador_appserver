@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc, NaiveDate, TimeZone};
+use chrono::{DateTime, Utc, TimeZone};
 use rocket::serde::{Deserialize,Serialize};
 use crate::types::factura_producto::FacturaProduct;
 use crate::types::cliente::Cliente;

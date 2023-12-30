@@ -1,6 +1,6 @@
-use chrono::DateTime;
-use rocket_db_pools::{sqlx::{query, Error, Transaction, Postgres, Row}, Connection};
-use crate::{types::Factura, Db};
+
+use rocket_db_pools::{sqlx::{query, Error}, Connection};
+use crate::{Db};
 const FORMAT: &'static str = "%Y-%m-%d %H:%M:%S%:z";
 
 pub enum OPERACION {

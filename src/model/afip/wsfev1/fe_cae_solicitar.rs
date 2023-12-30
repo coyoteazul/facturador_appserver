@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use chrono::{Local, NaiveDate, DateTime, Utc, NaiveDateTime};
+use chrono::{Local, Utc, NaiveDateTime};
 use reqwest::{Client, Error};
 use rocket_db_pools::Connection;
 use yaserde_derive::{YaSerialize,YaDeserialize};
@@ -10,7 +10,7 @@ use crate::aux_func::time_serde::date_to_yyyymmdd;
 use crate::model::afip::soap_utils::get_xml_tag;
 use crate::model::propio::factura::{db_factura_transmision, OPERACION::ENVIO, OPERACION::RESPUESTA};
 use crate::{model::afip::soap_utils::{afip_post, afip_signin}, types::Factura};
-use crate::types::Cliente;
+
 use rand::Rng;
 use super::constants::*;
 

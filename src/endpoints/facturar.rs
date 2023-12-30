@@ -1,5 +1,5 @@
 use reqwest::Client;
-use rocket::{serde::{json::{Json, Value, self}}, http::{Status, ContentType}, State};
+use rocket::{serde::{json::{Json, self}}, http::{Status, ContentType}, State};
 use rocket_db_pools::{Connection, sqlx::error::DatabaseError};
 use rocket_db_pools::sqlx::error::ErrorKind::UniqueViolation;
 use crate::{types::Factura, model::{propio::factura::{db_factura_alta}, afip::wsfev1::afip_fe_cae_solicitar}, Db};

@@ -16,7 +16,7 @@ pub async fn cliente_get(
 			let reto = json::to_value(&cli).unwrap();
 			return Ok(reto);
 		}
-		Err(e) => {
+		Err(_e) => {
 			return Err(Status::NoContent);
 		}
 	}
