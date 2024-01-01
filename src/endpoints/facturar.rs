@@ -10,9 +10,8 @@ pub async fn facturar(
 	input: Json<Factura>, 
 	req_cli: &State<Client>
 ) ->(Status, (ContentType, String)) { 
-	println!("facturar input{:?}", input);
+	dbg!("facturar input{:?}", &input);
 	let mut factura = input.0;
-	let mut err_msg: String = String::new();
 
 	//Alta de head e items en la base
 	let res = db_factura_alta(&mut db, &mut factura).await;
@@ -20,15 +19,15 @@ pub async fn facturar(
 	match res {
 		Ok(estado) => {
 			if estado {
-				let soli_res = afip_fe_cae_solicitar(&req_cli, &mut factura, &mut db, &mut err_msg).await;
+				let soli_res = afip_fe_cae_solicitar(&req_cli, &mut factura, &mut db).await;
 				match soli_res {
 					Ok(status) => {
-						if status {
+						if status.0 {
 							return (Status::Ok, (ContentType::JSON, 
 								json::to_string(&factura).unwrap()));
 						} else {
 							return (Status::InternalServerError, (ContentType::JSON, 
-								format!("{}", err_msg)));
+								format!("{}", status.1)));
 						}
 					}
 					Err(e) => {
@@ -45,7 +44,7 @@ pub async fn facturar(
 		}
 		Err(e) => {
 			let a: &dyn DatabaseError = e.as_database_error().unwrap();
-			println!("facturar err:{:?}", a);
+			dbg!("facturar err:{:?}", a);
 			match a.kind() {
 				UniqueViolation =>{
 					return (Status::Conflict, (ContentType::JSON, 

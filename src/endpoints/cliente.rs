@@ -5,18 +5,18 @@ use crate::{model::propio::cliente::{db_cliente_get, db_cliente_alta}, Db, types
 
 #[get("/cliente", data = "<input>")]
 pub async fn cliente_get(
-	db: Connection<Db>, input: Json<ClienteGet>
+	mut db: Connection<Db>, input: Json<ClienteGet>
 ) -> Result<Value, Status> { 
-	println!("cliente_get input:{:?}", input);
-	let res = db_cliente_get(db, input.tipo_doc, input.num_doc).await;
-	println!("{:?}", res);
+	dbg!("cliente_get input:", &input);
+	let res = db_cliente_get(&mut db, input.tipo_doc, input.num_doc).await;
+	dbg!(&res);
 
 	match res {
 		Ok(cli) => {
 			let reto = json::to_value(&cli).unwrap();
 			return Ok(reto);
 		}
-		Err(_e) => {
+		Err(_) => {
 			return Err(Status::NoContent);
 		}
 	}
@@ -32,20 +32,20 @@ pub struct ClienteGet {
 
 #[post("/cliente", data = "<input>")]
 pub async fn cliente_alta(
-	db: Connection<Db>, input: Json<Cliente>
+	mut db: Connection<Db>, input: Json<Cliente>
 ) -> Status { 
-	println!("cliente_alta input:{:?}", input);
-	let res = db_cliente_alta(db, input.0).await;
-	println!("{:?}", res);
+	dbg!("cliente_alta input:", &input);
+	let res = db_cliente_alta(&mut db, input.0).await;
+	dbg!(&res);
 
 	match res {
 		Ok(msg) => {
-			println!("cliente_alta ok:{:?}", msg);
+			dbg!("cliente_alta ok:", msg);
 			return Status::Ok;
 		}
 		Err(e) => {
 			let a = e.as_database_error().unwrap();
-			println!("cliente_alta err:{:?}", a);
+			dbg!("cliente_alta err:", a);
 			match a.kind() {
 				UniqueViolation =>{
 					return Status::Conflict;

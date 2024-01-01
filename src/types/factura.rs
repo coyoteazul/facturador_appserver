@@ -15,7 +15,7 @@ pub struct Factura {
 	pub punto_venta	:i32,
 	#[serde(default = "_default_i64")]
 	pub numero			:i64,
-	#[serde(with = "time_serde")]
+	#[serde(with = "time_serde", default="_default_now")]
 	pub fecha				:DateTime<Utc>,
 	#[serde(default = "_default_i64")]
 	pub cae					:i64,
@@ -37,3 +37,4 @@ impl Factura {
 const fn _default_i32() -> i32 { -1 }
 const fn _default_i64() -> i64 { -1 }
 fn _default_dt() -> DateTime<Utc> {Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).single().unwrap()}
+fn _default_now() -> DateTime<Utc> {Utc::now()}

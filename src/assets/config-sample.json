@@ -4,7 +4,8 @@
 	},
 	"afip_com": {
 		"cuit": "20366025589",
-		"nombre": "Hernan"
+		"nombre": "Hernan",
+		"direccion":"dir"
 	},
 	"entorno": {
 		"is_prd": false

@@ -23,7 +23,7 @@ pub async fn afip_dummy(
 
 	let parsed:FedummyResponse = yaserde::de::from_str(&get_xml_tag(&respuesta, "soap:Body") )
 	.map_err(|e| {
-		println!("Deserialization error: {:?}", e);
+		dbg!("Deserialization error: {:?}", e);
 	}).unwrap();
 	
 	return Ok(parsed.fe_dummy_result);

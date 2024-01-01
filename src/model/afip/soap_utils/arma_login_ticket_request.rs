@@ -1,8 +1,9 @@
-use chrono::{Local, DateTime};
+use chrono::{Utc, DateTime};
 
 pub fn arma_login_ticket_request_xml(
-	webservice:&str,req_date: DateTime<Local>,exp_date: DateTime<Local>
+	webservice:&str,req_date: DateTime<Utc>,exp_date: DateTime<Utc>
 ) -> String {
+	dbg!("Function call");
 	let gen_time = req_date.format("%Y-%m-%dT%H:%M:%S%:z").to_string();
 	let exp_time = exp_date.format("%Y-%m-%dT%H:%M:%S%:z").to_string();
 	let uniqueid = req_date.timestamp().to_string();

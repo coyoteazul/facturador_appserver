@@ -23,7 +23,7 @@ impl Conf {
 			 "{my_postgres_db={url=\"",setting.database.url,"\"}}");
 
 			std::env::set_var("ROCKET_DATABASES", db_url);
-			println!("ROCKET_DATABASES: {}", std::env::var("ROCKET_DATABASES").unwrap());
+			dbg!("ROCKET_DATABASES: {}", std::env::var("ROCKET_DATABASES").unwrap());
 			return setting;
 	}
 	pub fn is_prd(&self) -> bool {

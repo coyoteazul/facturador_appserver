@@ -5,6 +5,7 @@ use crate::types::FacturaProduct;
 pub async fn db_factura_producto_alta(
 	trans: &mut Transaction<'_, Postgres>, id_factura:i32, producto:&FacturaProduct	 
 ) -> Result<PgQueryResult, Error> {
+	dbg!("Function call");
 	const QRY:&str = 
 		"insert into factura_producto (id_factura, item_num, id_producto, cantidad, valor)
 		 values                       ($1        , $2      , $3         , $4      , $5    )";

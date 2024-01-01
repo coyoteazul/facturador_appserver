@@ -6,7 +6,7 @@ use crate::Db;
 use crate::types::Cliente;
 
 pub async fn db_cliente_get(
-	mut db: Connection<Db>, tipo_doc: i32, num_doc: i64
+	db: &mut Connection<Db>, tipo_doc: i32, num_doc: i64
 ) -> Result<Cliente, Error> {
 	let qry = 
 		sqlx::query("SELECT nombre FROM cliente 
@@ -14,14 +14,14 @@ pub async fn db_cliente_get(
 		.bind(tipo_doc)
 		.bind(num_doc);
 	
-	return qry.fetch_one(&mut **db).await
+	return qry.fetch_one(&mut ***db).await
 		.and_then(|r| Ok(Cliente{
 				nombre: r.try_get(0)?, tipo_doc, num_doc
 		}));
 }
 
 pub async fn db_cliente_alta(
-	mut db: Connection<Db>, cliente:Cliente 
+	db: &mut Connection<Db>, cliente:Cliente 
 ) -> Result<PgQueryResult, Error> {
 	let qry = 
 		sqlx::query("insert into cliente (tipo_doc_cod, num_doc, nombre) 
@@ -30,7 +30,7 @@ pub async fn db_cliente_alta(
 		.bind(cliente.num_doc)
 		.bind(cliente.nombre);
 	
-	let retorno = qry.execute(&mut **db).await;
-	println!("db_cliente_alta:{:?}", retorno);
+	let retorno = qry.execute(&mut ***db).await;
+	dbg!("db_cliente_alta:{:?}", &retorno);
 	return retorno
 }

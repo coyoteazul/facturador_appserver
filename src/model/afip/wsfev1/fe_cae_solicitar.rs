@@ -1,17 +1,14 @@
-use std::str::FromStr;
-
-use chrono::{Local, Utc, NaiveDateTime};
+use chrono::{Utc, NaiveDate, Local};
 use reqwest::{Client, Error};
 use rocket_db_pools::Connection;
 use yaserde_derive::{YaSerialize,YaDeserialize};
 use yaserde;
+use crate::model::propio::factura::db_factura_set_cae;
 use crate::{Db, CONF};
 use crate::aux_func::time_serde::date_to_yyyymmdd;
 use crate::model::afip::soap_utils::get_xml_tag;
 use crate::model::propio::factura::{db_factura_transmision, OPERACION::ENVIO, OPERACION::RESPUESTA};
 use crate::{model::afip::soap_utils::{afip_post, afip_signin}, types::Factura};
-
-use rand::Rng;
 use super::constants::*;
 
 /** Ingresa a afip, registra el intento de transmision y luego transmite a afip
@@ -20,107 +17,134 @@ use super::constants::*;
 pub async fn afip_fe_cae_solicitar(
 	req_cli: &Client,
 	factura: &mut Factura,
-	db: &mut Connection<Db>,
-	mut err_msg: &String
-) -> Result<bool, Error>{
-	let id_transmision = rand::thread_rng().gen_range(1..=100000);
+	db: &mut Connection<Db>
+) -> Result<(bool,String), Error>{
+	dbg!("Function call");
 	let url = if CONF.is_prd() {WSFEV1_PRD} else {WSFEV1_VAL};
 
-	let auth = afip_signin(req_cli, "WSFE").await;
-	let soap_msg = factura_to_soap(factura,auth);
-	let _ = db_factura_transmision(db, factura.id_factura,id_transmision, ENVIO, &soap_msg).await;
+	match afip_signin(req_cli, "wsfe",db).await {
+		Ok(auth) => {
+			let soap_msg = factura_to_soap(factura,auth);
+			let id_trans = db_factura_transmision(db, factura.id_factura,None, ENVIO, &soap_msg).await.unwrap();
 
-	let respuesta = afip_post(req_cli, url,soap_msg).await?;
-	let _ = db_factura_transmision(db, factura.id_factura,id_transmision, RESPUESTA, &respuesta).await;
+			let respuesta = afip_post(req_cli, url,soap_msg).await?;
+			let _ = db_factura_transmision(db, factura.id_factura,Some(id_trans), RESPUESTA, &respuesta).await;
 
-	let body = get_xml_tag(&respuesta, "soap:Body");
-	let parsed:Result<FecaesolicitarResponse, ()> = 
-		yaserde::de::from_str(&body).map_err(|e| {
-			println!("Deserialization error: {:?}", e);
-		});
+			if respuesta.contains("<soap:Fault>") {
+				return Ok((false,respuesta));
+			}
+			let body = get_xml_tag(&respuesta, "soap:Body")
+			.replace("xmlns=\"http://ar.gov.afip.dif.FEV1/\"", "");
 
-	match parsed {
-		Ok(a) => {
-			println!("parsed ok:{:?}",a);
-			let result = a.fecae_solicitar_result.unwrap();
+			let parsed:Result<FecaesolicitarResponse, String> = 
+				yaserde::de::from_str(&body).map_err(|e| {
+					return format!("Deserialization error: {:?}", e);
+				});
 
-			match result.errors {
-				Some(afip_err) => {
-					println!("afip_err:{:?}",afip_err);
-					err_msg = &mut format!("afip_err:{:?}",afip_err);
-					return Ok(false);
+			match parsed {
+				Ok(a) => {
+					dbg!("parsed ok:",&a,body);
+					let result = a.fecae_solicitar_result.unwrap();
+
+					match result.errors {
+						Some(afip_err) => {
+							let msg = format!("afip_err:{:?}",afip_err);
+							dbg!(&msg);
+							return Ok((false,msg));
+						}
+						None => {
+							let d2 = result.fe_det_resp.unwrap();
+							let d3: &FecaedetResponse = d2.fecae_det_response.get(0).unwrap();
+							match &d3.fedet_response.resultado {
+								Some(resultado) => {
+									if resultado == "A" {
+										let venci_str = d3.cae_fch_vto.as_ref().unwrap();
+										let venci = NaiveDate::parse_from_str(&venci_str, "%Y%m%d").unwrap().and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).single().unwrap().naive_utc().and_utc();
+										factura.cae = d3.cae.as_ref().unwrap().parse().unwrap();
+										factura.venc_cae = venci;
+										let _ = db_factura_set_cae(db, factura).await;
+									}
+								}
+								None => {
+									let msg = "Se recibio respuesta de afip pero no se encontro el tag 'resultado'".to_string();
+									dbg!(&msg);
+									return Ok((false, msg));
+								}
+							}
+						}
+					}			
 				}
-				None => {
-					let d2 = result.fe_det_resp.unwrap();
-					let d3 = d2.fecae_det_response.get(0).unwrap();
-					let venci_str = d3.cae_fch_vto.as_ref().unwrap();
-					let venci = NaiveDateTime::parse_from_str(&venci_str,"%Y%m%d").unwrap().and_local_timezone(Local).single().unwrap();
-					factura.cae = d3.cae.as_ref().unwrap().parse().unwrap();
-					factura.venc_cae = venci.with_timezone(&Utc);
+				Err(e) => {
+					dbg!(&e);
+					return Ok((false,e));
 				}
 
-			}			
+			}
+
+			return Ok((true,"".to_string()));
 		}
 		Err(e) => {
-			err_msg = &mut format!("parsed err:{:?}",e);
-			println!("parsed err:{:?}",e);
-			return Ok(false);
+			dbg!(&e);
+			return Ok((false,e));
 		}
-
-	}
-
-	return Ok(true);
+	};
+	
+	
 }
 
 fn factura_to_soap(
 	factura: &Factura, auth:String
 ) -> String {
-	let body = Fecaesolicitar {
-    auth,
-    fe_cae_req: Some(Fecaerequest{
-        fe_cab_req: Some(FecaecabRequest{
-            fecab_request: FecabRequest {
-                cant_reg: 	1,
-                pto_vta: 		factura.punto_venta,
-                cbte_tipo: 	factura.tipo_fac,
-            }
-        }),
-        fe_det_req: Some(ArrayOfFECAEDetRequest{
-            fecae_det_request: vec![
-							FecaedetRequest{ 
-								fedet_request: FedetRequest{ 
-									concepto: 			1, //1 Productos, 2 Servicios, 3 Ambos
-									doc_tipo: 			factura.cliente.tipo_doc,  //Código de documento identificatorio del comprador
-									doc_nro: 				factura.cliente.num_doc, 
-									cbte_desde: 		factura.numero,
-									cbte_hasta: 		factura.numero,
-									cbte_fch: 			Some(date_to_yyyymmdd(factura.fecha)), 
-									imp_total: 			factura.total(),
-									imp_tot_conc: 	0.0, //para tipo C tiene que ser cero
-									imp_neto:	 			factura.total(), //para tipo C, este es el subtotal
-									imp_op_ex: 			0.0, //para tipo C tiene que ser cero
-									imp_trib: 			0.0,
-									imp_iva: 				0.0, //para tipo C tiene que ser cero
-									fch_serv_desde: None, //Solo se informa si concepto NO es producto
-									fch_serv_hasta: None, //Solo se informa si concepto NO es producto
-									fch_vto_pago: 	None, //Solo se informa si concepto NO es producto
-									mon_id: 				Some(String::from("PES")), 
-									mon_cotiz: 			1.0, 
-									cbtes_asoc: 		None, 
-									tributos: 			None, 
-									iva: 						None, 
-									opcionales: 		None,
-									compradores: 		None, 
-									periodo_asoc: 	None, 
-									actividades: 		None
-								}, 
-								xsi_type: String::from("No tengo idea que es esto") }
-						]
-						,
-        }),
-    }),
-
+	dbg!("Function call");
+	const SOAP_HEAD_SIZE:usize = "<?xml version=\"1.0\" encoding=\"utf-8\"?>".len();
+	let body = Fecaerequest{
+		fe_cab_req: Some(FecaecabRequest{
+				fecab_request: FecabRequest {
+						cant_reg: 	1,
+						pto_vta: 		factura.punto_venta,
+						cbte_tipo: 	factura.tipo_fac,
+				}
+		}),
+		fe_det_req: Some(ArrayOfFECAEDetRequest{
+				fecae_det_request: vec![
+					FecaedetRequest{ 
+						fedet_request: FedetRequest{ 
+							concepto: 			1, //1 Productos, 2 Servicios, 3 Ambos
+							doc_tipo: 			factura.cliente.tipo_doc,  //Código de documento identificatorio del comprador
+							doc_nro: 				factura.cliente.num_doc, 
+							cbte_desde: 		factura.numero,
+							cbte_hasta: 		factura.numero,
+							cbte_fch: 			Some(date_to_yyyymmdd(factura.fecha)), 
+							imp_total: 			factura.total(),
+							imp_tot_conc: 	0.0, //para tipo C tiene que ser cero
+							imp_neto:	 			factura.total(), //para tipo C, este es el subtotal
+							imp_op_ex: 			0.0, //para tipo C tiene que ser cero
+							imp_trib: 			0.0,
+							imp_iva: 				0.0, //para tipo C tiene que ser cero
+							fch_serv_desde: None, //Solo se informa si concepto NO es producto
+							fch_serv_hasta: None, //Solo se informa si concepto NO es producto
+							fch_vto_pago: 	None, //Solo se informa si concepto NO es producto
+							mon_id: 				Some(String::from("PES")), 
+							mon_cotiz: 			1.0, 
+							cbtes_asoc: 		None, 
+							tributos: 			None, 
+							iva: 						None, 
+							opcionales: 		None,
+							compradores: 		None, 
+							periodo_asoc: 	None, 
+							actividades: 		None
+						}
+					}
+				]
+				,
+		})
 	};
+
+	let factura_str = yaserde::ser::to_string(&body)
+	.expect("Failed to serialize to XML")
+	//Remover cabezal
+	.split_at(SOAP_HEAD_SIZE).1.to_string();
+
 
 	return format!(
 		"<soap:Envelope 
@@ -128,57 +152,59 @@ fn factura_to_soap(
 			xmlns:ar=\"http://ar.gov.afip.dif.FEV1/\">
 			<soap:Header/>
 			<soap:Body>
-				{}
+			<ar:FECAESolicitar>
+				{auth}
+				{factura_str}
+			</ar:FECAESolicitar>	
 			</soap:Body>
-			</soap:Envelope>",
-			yaserde::ser::to_string(&body).expect("Failed to serialize to XML")
+			</soap:Envelope>"
 		);
 }
 
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAESolicitar",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
 	namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-	prefix = "tns",
+	prefix = "ar",
 )]
 struct Fecaesolicitar {
-	#[yaserde(rename = "Auth", prefix = "tns", default)]
+	#[yaserde(rename = "Auth", prefix = "ar", default)]
 	pub auth: String, 
-	#[yaserde(rename = "FeCAEReq", prefix = "tns", default)]
+	#[yaserde(rename = "FeCAEReq", prefix = "ar", default)]
 	pub fe_cae_req: Option<Fecaerequest>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FEAuthRequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct FeauthRequest {
-	#[yaserde(rename = "Token", prefix = "tns", default)]
+	#[yaserde(rename = "Token", prefix = "ar", default)]
 	pub token: Option<String>, 
-	#[yaserde(rename = "Sign", prefix = "tns", default)]
+	#[yaserde(rename = "Sign", prefix = "ar", default)]
 	pub sign: Option<String>, 
-	#[yaserde(rename = "Cuit", prefix = "tns", default)]
+	#[yaserde(rename = "Cuit", prefix = "ar", default)]
 	pub cuit: i64, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
-	rename = "FECAERequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	rename = "FeCAEReq",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct Fecaerequest {
-	#[yaserde(rename = "FeCabReq", prefix = "tns", default)]
+	#[yaserde(rename = "FeCabReq", prefix = "ar", default)]
 	pub fe_cab_req: Option<FecaecabRequest>, 
-	#[yaserde(rename = "FeDetReq", prefix = "tns", default)]
+	#[yaserde(rename = "FeDetReq", prefix = "ar", default)]
 	pub fe_det_req: Option<ArrayOfFECAEDetRequest>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAECabRequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct FecaecabRequest {
 	#[yaserde(flatten, default)]
@@ -188,251 +214,247 @@ struct FecaecabRequest {
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECabRequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	prefix = "ar",
 )]
 struct FecabRequest {
-	#[yaserde(rename = "CantReg", prefix = "tns", default)]
+	#[yaserde(rename = "CantReg", prefix = "ar", default)]
 	pub cant_reg: i32, 
-	#[yaserde(rename = "PtoVta", prefix = "tns", default)]
+	#[yaserde(rename = "PtoVta", prefix = "ar", default)]
 	pub pto_vta: i32, 
-	#[yaserde(rename = "CbteTipo", prefix = "tns", default)]
+	#[yaserde(rename = "CbteTipo", prefix = "ar", default)]
 	pub cbte_tipo: i32, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfFECAEDetRequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfFECAEDetRequest {
-	#[yaserde(rename = "FECAEDetRequest", prefix = "tns", default)]
+	#[yaserde(rename = "FECAEDetRequest", prefix = "ar", default)]
 	pub fecae_det_request: Vec<FecaedetRequest>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAEDetRequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	prefix = "ar",
 )]
 struct FecaedetRequest {
 	#[yaserde(flatten, default)]
-	pub fedet_request: FedetRequest, 
-#[yaserde(prefix = "xsi", rename="type", attribute)]
-pub xsi_type: String,
+	pub fedet_request: FedetRequest
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FEDetRequest",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct FedetRequest {
-	#[yaserde(rename = "Concepto", prefix = "tns", default)]
+	#[yaserde(rename = "Concepto", prefix = "ar", default)]
 	pub concepto: i32, 
-	#[yaserde(rename = "DocTipo", prefix = "tns", default)]
+	#[yaserde(rename = "DocTipo", prefix = "ar", default)]
 	pub doc_tipo: i32, 
-	#[yaserde(rename = "DocNro", prefix = "tns", default)]
+	#[yaserde(rename = "DocNro", prefix = "ar", default)]
 	pub doc_nro: i64, 
-	#[yaserde(rename = "CbteDesde", prefix = "tns", default)]
+	#[yaserde(rename = "CbteDesde", prefix = "ar", default)]
 	pub cbte_desde: i64, 
-	#[yaserde(rename = "CbteHasta", prefix = "tns", default)]
+	#[yaserde(rename = "CbteHasta", prefix = "ar", default)]
 	pub cbte_hasta: i64, 
-	#[yaserde(rename = "CbteFch", prefix = "tns", default)]
+	#[yaserde(rename = "CbteFch", prefix = "ar", default)]
 	pub cbte_fch: Option<String>, 
-	#[yaserde(rename = "ImpTotal", prefix = "tns", default)]
+	#[yaserde(rename = "ImpTotal", prefix = "ar", default)]
 	pub imp_total: f64, 
-	#[yaserde(rename = "ImpTotConc", prefix = "tns", default)]
+	#[yaserde(rename = "ImpTotConc", prefix = "ar", default)]
 	pub imp_tot_conc: f64, 
-	#[yaserde(rename = "ImpNeto", prefix = "tns", default)]
+	#[yaserde(rename = "ImpNeto", prefix = "ar", default)]
 	pub imp_neto: f64, 
-	#[yaserde(rename = "ImpOpEx", prefix = "tns", default)]
+	#[yaserde(rename = "ImpOpEx", prefix = "ar", default)]
 	pub imp_op_ex: f64, 
-	#[yaserde(rename = "ImpTrib", prefix = "tns", default)]
+	#[yaserde(rename = "ImpTrib", prefix = "ar", default)]
 	pub imp_trib: f64, 
-	#[yaserde(rename = "ImpIVA", prefix = "tns", default)]
+	#[yaserde(rename = "ImpIVA", prefix = "ar", default)]
 	pub imp_iva: f64, 
-	#[yaserde(rename = "FchServDesde", prefix = "tns", default)]
+	#[yaserde(rename = "FchServDesde", prefix = "ar", default)]
 	pub fch_serv_desde: Option<String>, 
-	#[yaserde(rename = "FchServHasta", prefix = "tns", default)]
+	#[yaserde(rename = "FchServHasta", prefix = "ar", default)]
 	pub fch_serv_hasta: Option<String>, 
-	#[yaserde(rename = "FchVtoPago", prefix = "tns", default)]
+	#[yaserde(rename = "FchVtoPago", prefix = "ar", default)]
 	pub fch_vto_pago: Option<String>, 
-	#[yaserde(rename = "MonId", prefix = "tns", default)]
+	#[yaserde(rename = "MonId", prefix = "ar", default)]
 	pub mon_id: Option<String>, 
-	#[yaserde(rename = "MonCotiz", prefix = "tns", default)]
+	#[yaserde(rename = "MonCotiz", prefix = "ar", default)]
 	pub mon_cotiz: f64, 
-	#[yaserde(rename = "CbtesAsoc", prefix = "tns", default)]
+	#[yaserde(rename = "CbtesAsoc", prefix = "ar", default)]
 	pub cbtes_asoc: Option<ArrayOfCbteAsoc>, 
-	#[yaserde(rename = "Tributos", prefix = "tns", default)]
+	#[yaserde(rename = "Tributos", prefix = "ar", default)]
 	pub tributos: Option<ArrayOfTributo>, 
-	#[yaserde(rename = "Iva", prefix = "tns", default)]
+	#[yaserde(rename = "Iva", prefix = "ar", default)]
 	pub iva: Option<ArrayOfAlicIva>, 
-	#[yaserde(rename = "Opcionales", prefix = "tns", default)]
+	#[yaserde(rename = "Opcionales", prefix = "ar", default)]
 	pub opcionales: Option<ArrayOfOpcional>, 
-	#[yaserde(rename = "Compradores", prefix = "tns", default)]
+	#[yaserde(rename = "Compradores", prefix = "ar", default)]
 	pub compradores: Option<ArrayOfComprador>, 
-	#[yaserde(rename = "PeriodoAsoc", prefix = "tns", default)]
+	#[yaserde(rename = "PeriodoAsoc", prefix = "ar", default)]
 	pub periodo_asoc: Option<Periodo>, 
-	#[yaserde(rename = "Actividades", prefix = "tns", default)]
+	#[yaserde(rename = "Actividades", prefix = "ar", default)]
 	pub actividades: Option<ArrayOfActividad>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfCbteAsoc",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfCbteAsoc {
-	#[yaserde(rename = "CbteAsoc", prefix = "tns", default)]
+	#[yaserde(rename = "CbteAsoc", prefix = "ar", default)]
 	pub cbte_asoc: Vec<CbteAsoc>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "CbteAsoc",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct CbteAsoc {
-	#[yaserde(rename = "Tipo", prefix = "tns", default)]
+	#[yaserde(rename = "Tipo", prefix = "ar", default)]
 	pub tipo: i32, 
-	#[yaserde(rename = "PtoVta", prefix = "tns", default)]
+	#[yaserde(rename = "PtoVta", prefix = "ar", default)]
 	pub pto_vta: i32, 
-	#[yaserde(rename = "Nro", prefix = "tns", default)]
+	#[yaserde(rename = "Nro", prefix = "ar", default)]
 	pub nro: i64, 
-	#[yaserde(rename = "Cuit", prefix = "tns", default)]
+	#[yaserde(rename = "Cuit", prefix = "ar", default)]
 	pub cuit: Option<String>, 
-	#[yaserde(rename = "CbteFch", prefix = "tns", default)]
+	#[yaserde(rename = "CbteFch", prefix = "ar", default)]
 	pub cbte_fch: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfTributo",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfTributo {
-	#[yaserde(rename = "Tributo", prefix = "tns", default)]
+	#[yaserde(rename = "Tributo", prefix = "ar", default)]
 	pub tributo: Vec<Tributo>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Tributo",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct Tributo {
-	#[yaserde(rename = "Id", prefix = "tns", default)]
+	#[yaserde(rename = "Id", prefix = "ar", default)]
 	pub id: i16, 
-	#[yaserde(rename = "Desc", prefix = "tns", default)]
+	#[yaserde(rename = "Desc", prefix = "ar", default)]
 	pub desc: Option<String>, 
-	#[yaserde(rename = "BaseImp", prefix = "tns", default)]
+	#[yaserde(rename = "BaseImp", prefix = "ar", default)]
 	pub base_imp: f64, 
-	#[yaserde(rename = "Alic", prefix = "tns", default)]
+	#[yaserde(rename = "Alic", prefix = "ar", default)]
 	pub alic: f64, 
-	#[yaserde(rename = "Importe", prefix = "tns", default)]
+	#[yaserde(rename = "Importe", prefix = "ar", default)]
 	pub importe: f64, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfAlicIva",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfAlicIva {
-	#[yaserde(rename = "AlicIva", prefix = "tns", default)]
+	#[yaserde(rename = "AlicIva", prefix = "ar", default)]
 	pub alic_iva: Vec<AlicIva>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "AlicIva",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct AlicIva {
-	#[yaserde(rename = "Id", prefix = "tns", default)]
+	#[yaserde(rename = "Id", prefix = "ar", default)]
 	pub id: i32, 
-	#[yaserde(rename = "BaseImp", prefix = "tns", default)]
+	#[yaserde(rename = "BaseImp", prefix = "ar", default)]
 	pub base_imp: f64, 
-	#[yaserde(rename = "Importe", prefix = "tns", default)]
+	#[yaserde(rename = "Importe", prefix = "ar", default)]
 	pub importe: f64, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfOpcional",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfOpcional {
-	#[yaserde(rename = "Opcional", prefix = "tns", default)]
+	#[yaserde(rename = "Opcional", prefix = "ar", default)]
 	pub opcional: Vec<Opcional>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Opcional",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct Opcional {
-	#[yaserde(rename = "Id", prefix = "tns", default)]
+	#[yaserde(rename = "Id", prefix = "ar", default)]
 	pub id: Option<String>, 
-	#[yaserde(rename = "Valor", prefix = "tns", default)]
+	#[yaserde(rename = "Valor", prefix = "ar", default)]
 	pub valor: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfComprador",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfComprador {
-	#[yaserde(rename = "Comprador", prefix = "tns", default)]
+	#[yaserde(rename = "Comprador", prefix = "ar", default)]
 	pub comprador: Vec<Comprador>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Comprador",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct Comprador {
-	#[yaserde(rename = "DocTipo", prefix = "tns", default)]
+	#[yaserde(rename = "DocTipo", prefix = "ar", default)]
 	pub doc_tipo: i32, 
-	#[yaserde(rename = "DocNro", prefix = "tns", default)]
+	#[yaserde(rename = "DocNro", prefix = "ar", default)]
 	pub doc_nro: i64, 
-	#[yaserde(rename = "Porcentaje", prefix = "tns", default)]
+	#[yaserde(rename = "Porcentaje", prefix = "ar", default)]
 	pub porcentaje: f64, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Periodo",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct Periodo {
-	#[yaserde(rename = "FchDesde", prefix = "tns", default)]
+	#[yaserde(rename = "FchDesde", prefix = "ar", default)]
 	pub fch_desde: Option<String>, 
-	#[yaserde(rename = "FchHasta", prefix = "tns", default)]
+	#[yaserde(rename = "FchHasta", prefix = "ar", default)]
 	pub fch_hasta: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfActividad",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct ArrayOfActividad {
-	#[yaserde(rename = "Actividad", prefix = "tns", default)]
+	#[yaserde(rename = "Actividad", prefix = "ar", default)]
 	pub actividad: Vec<Actividad>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Actividad",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	//namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar",
 )]
 struct Actividad {
-	#[yaserde(rename = "Id", prefix = "tns", default)]
+	#[yaserde(rename = "Id", prefix = "ar", default)]
 	pub id: i64, 
 }
 
@@ -443,177 +465,175 @@ struct Actividad {
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAESolicitarResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
 	namespace = "xsi: http://www.w3.org/2001/XMLSchema-instance",
-	prefix = "tns",
+	prefix = "ar: ",
 )]
 struct FecaesolicitarResponse {
-	#[yaserde(rename = "FECAESolicitarResult", prefix = "tns", default)]
+	#[yaserde(rename = "FECAESolicitarResult", prefix = "ar", default)]
 	pub fecae_solicitar_result: Option<Fecaeresponse>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAEResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct Fecaeresponse {
-	#[yaserde(rename = "FeCabResp", prefix = "tns", default)]
+	#[yaserde(rename = "FeCabResp", prefix = "ar", default)]
 	pub fe_cab_resp: Option<FecaecabResponse>, 
-	#[yaserde(rename = "FeDetResp", prefix = "tns", default)]
+	#[yaserde(rename = "FeDetResp", prefix = "ar", default)]
 	pub fe_det_resp: Option<ArrayOfFECAEDetResponse>, 
-	#[yaserde(rename = "Events", prefix = "tns", default)]
+	#[yaserde(rename = "Events", prefix = "ar", default)]
 	pub events: Option<ArrayOfEvt>, 
-	#[yaserde(rename = "Errors", prefix = "tns", default)]
+	#[yaserde(rename = "Errors", prefix = "ar", default)]
 	pub errors: Option<ArrayOfErr>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAECabResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct FecaecabResponse {
 	#[yaserde(flatten, default)]
 	pub fecab_response: FecabResponse, 
-#[yaserde(prefix = "xsi", rename="type", attribute)]
-pub xsi_type: String,
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECabResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct FecabResponse {
-	#[yaserde(rename = "Cuit", prefix = "tns", default)]
+	#[yaserde(rename = "Cuit", prefix = "ar", default)]
 	pub cuit: i64, 
-	#[yaserde(rename = "PtoVta", prefix = "tns", default)]
+	#[yaserde(rename = "PtoVta", prefix = "ar", default)]
 	pub pto_vta: i32, 
-	#[yaserde(rename = "CbteTipo", prefix = "tns", default)]
+	#[yaserde(rename = "CbteTipo", prefix = "ar", default)]
 	pub cbte_tipo: i32, 
-	#[yaserde(rename = "FchProceso", prefix = "tns", default)]
+	#[yaserde(rename = "FchProceso", prefix = "ar", default)]
 	pub fch_proceso: Option<String>, 
-	#[yaserde(rename = "CantReg", prefix = "tns", default)]
+	#[yaserde(rename = "CantReg", prefix = "ar", default)]
 	pub cant_reg: i32, 
-	#[yaserde(rename = "Resultado", prefix = "tns", default)]
+	#[yaserde(rename = "Resultado", prefix = "ar", default)]
 	pub resultado: Option<String>, 
-	#[yaserde(rename = "Reproceso", prefix = "tns", default)]
+	#[yaserde(rename = "Reproceso", prefix = "ar", default)]
 	pub reproceso: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfFECAEDetResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct ArrayOfFECAEDetResponse {
-	#[yaserde(rename = "FECAEDetResponse", prefix = "tns", default)]
+	#[yaserde(rename = "FECAEDetResponse", prefix = "ar", default)]
 	pub fecae_det_response: Vec<FecaedetResponse>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FECAEDetResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct FecaedetResponse {
 	#[yaserde(flatten, default)]
 	pub fedet_response: FedetResponse, 
 #[yaserde(prefix = "xsi", rename="type", attribute)]
 pub xsi_type: String,
-	#[yaserde(rename = "CAE", prefix = "tns", default)]
+	#[yaserde(rename = "CAE", prefix = "ar", default)]
 	pub cae: Option<String>, 
-	#[yaserde(rename = "CAEFchVto", prefix = "tns", default)]
+	#[yaserde(rename = "CAEFchVto", prefix = "ar", default)]
 	pub cae_fch_vto: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "FEDetResponse",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct FedetResponse {
-	#[yaserde(rename = "Concepto", prefix = "tns", default)]
+	#[yaserde(rename = "Concepto", prefix = "ar", default)]
 	pub concepto: i32, 
-	#[yaserde(rename = "DocTipo", prefix = "tns", default)]
+	#[yaserde(rename = "DocTipo", prefix = "ar", default)]
 	pub doc_tipo: i32, 
-	#[yaserde(rename = "DocNro", prefix = "tns", default)]
+	#[yaserde(rename = "DocNro", prefix = "ar", default)]
 	pub doc_nro: i64, 
-	#[yaserde(rename = "CbteDesde", prefix = "tns", default)]
+	#[yaserde(rename = "CbteDesde", prefix = "ar", default)]
 	pub cbte_desde: i64, 
-	#[yaserde(rename = "CbteHasta", prefix = "tns", default)]
+	#[yaserde(rename = "CbteHasta", prefix = "ar", default)]
 	pub cbte_hasta: i64, 
-	#[yaserde(rename = "CbteFch", prefix = "tns", default)]
+	#[yaserde(rename = "CbteFch", prefix = "ar", default)]
 	pub cbte_fch: Option<String>, 
-	#[yaserde(rename = "Resultado", prefix = "tns", default)]
+	#[yaserde(rename = "Resultado", prefix = "ar", default)]
 	pub resultado: Option<String>, 
-	#[yaserde(rename = "Observaciones", prefix = "tns", default)]
+	#[yaserde(rename = "Observaciones", prefix = "ar", default)]
 	pub observaciones: Option<ArrayOfObs>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfObs",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct ArrayOfObs {
-	#[yaserde(rename = "Obs", prefix = "tns", default)]
+	#[yaserde(rename = "Obs", prefix = "ar", default)]
 	pub obs: Vec<Obs>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Obs",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct Obs {
-	#[yaserde(rename = "Code", prefix = "tns", default)]
+	#[yaserde(rename = "Code", prefix = "ar", default)]
 	pub code: i32, 
-	#[yaserde(rename = "Msg", prefix = "tns", default)]
+	#[yaserde(rename = "Msg", prefix = "ar", default)]
 	pub msg: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfEvt",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct ArrayOfEvt {
-	#[yaserde(rename = "Evt", prefix = "tns", default)]
+	#[yaserde(rename = "Evt", prefix = "ar", default)]
 	pub evt: Vec<Evt>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Evt",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct Evt {
-	#[yaserde(rename = "Code", prefix = "tns", default)]
+	#[yaserde(rename = "Code", prefix = "ar", default)]
 	pub code: i32, 
-	#[yaserde(rename = "Msg", prefix = "tns", default)]
+	#[yaserde(rename = "Msg", prefix = "ar", default)]
 	pub msg: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "ArrayOfErr",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct ArrayOfErr {
-	#[yaserde(rename = "Err", prefix = "tns", default)]
+	#[yaserde(rename = "Err", prefix = "ar", default)]
 	pub err: Vec<Err>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(
 	rename = "Err",
-	namespace = "tns: http://ar.gov.afip.dif.FEV1/",
-	prefix = "tns",
+	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
+	prefix = "ar: ",
 )]
 struct Err {
-	#[yaserde(rename = "Code", prefix = "tns", default)]
+	#[yaserde(rename = "Code", prefix = "ar", default)]
 	pub code: i32, 
-	#[yaserde(rename = "Msg", prefix = "tns", default)]
+	#[yaserde(rename = "Msg", prefix = "ar", default)]
 	pub msg: Option<String>, 
 }

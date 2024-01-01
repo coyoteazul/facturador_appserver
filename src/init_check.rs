@@ -16,9 +16,9 @@ fn try_open(file_path:&PathBuf) -> bool {
 	let mut retorno = true;
 	let file = File::open(file_path);
 	file.err().map(|err|{
-		println!("--No se pudo abrir el archivo: {} :||: {:?}",
+		dbg!("--No se pudo abrir el archivo: {} :||: {:?}",
 			file_path.display().to_string(), err);
-			println!("");
+			dbg!("");
 		retorno = false;
 	});
 
