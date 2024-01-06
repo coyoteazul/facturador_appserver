@@ -50,15 +50,20 @@ pub struct Server {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(crate = "rocket::serde")]
 pub struct Entorno {
-	pub is_prd: bool
+	pub is_prd: bool,
+	pub impresora:String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(crate = "rocket::serde")]
 pub struct AfipCom {
-	pub cuit: String,
-	pub nombre: String,
-	pub direccion: String
+	pub cuit: i64,
+	pub iibb_num: i64,
+	pub nombre_fantasia: String,
+	pub direccion: String,
+	pub inicio_actividad: String,
+	pub iva_responsable: String,
+
 }
 
 #[derive(Debug, Deserialize, Clone)]

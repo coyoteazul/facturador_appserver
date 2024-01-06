@@ -7,13 +7,16 @@ mod init_check;
 
 
 
+use std::{path::PathBuf, env};
+
 use init_check::init_check;
 use lazy_static::lazy_static;
 
 use rocket_db_pools::Database;
 use sqlx;
-use rocket::{launch, routes};
+use rocket::{launch, routes, fs::FileServer};
 use conf::Conf;
+use local_ip_address::local_ip;
 
 
 
@@ -33,7 +36,9 @@ async fn rocket() -> _ {
 		let _ = std::process::exit(0);
 	}
 
-	dbg!("Iniciando entorno: {}", if CONF.is_prd() {"PRD"} else {"VAL"} );
+	println!("Iniciando entorno: {}", if CONF.is_prd() {"PRD"} else {"VAL"} );
+	println!("Direccion del frontend:{:?}:8000",local_ip().unwrap());
+
 
 	let cli = reqwest::Client::builder()
 		.user_agent("a")
@@ -44,9 +49,12 @@ async fn rocket() -> _ {
 		.manage(cli)
 		.attach(Db::init())
 		.attach(make_cors()) // 7.
-		.mount("/", routes![endpoints::facturar::facturar])
-		.mount("/", routes![endpoints::cliente::cliente_get])
-		.mount("/", routes![endpoints::cliente::cliente_alta])
+		.mount("/", FileServer::from(frontend_filepath())) //copiar dist del proyecto react, y renombrarlo a front_end
+		.mount("/endback", routes![
+			endpoints::facturar::facturar,
+			endpoints::cliente::cliente_get,
+			endpoints::producto::producto_get,
+			endpoints::producto_grupo::producto_grupo_get])
 }
 
 
@@ -58,12 +66,13 @@ use rocket_cors::{
 };
 
 fn make_cors() -> Cors {
-    let allowed_origins = AllowedOrigins::some_exact(&[ // 4.
+    /*let allowed_origins = AllowedOrigins::some_exact(&[ // 4.
         "http://localhost:8081",
         "http://127.0.0.1:8081",
         "http://localhost:8000",
         "http://0.0.0.0:8000",
-    ]);
+    ]);*/
+		let allowed_origins = AllowedOrigins::All;
 
     CorsOptions { // 5.
         allowed_origins,
@@ -79,4 +88,10 @@ fn make_cors() -> Cors {
     }
     .to_cors()
     .expect("error while building CORS")
+}
+
+pub fn frontend_filepath() ->PathBuf {
+	dbg!("Function call");
+	const FILE:&str = "./front_end";
+	return env::current_exe().unwrap().parent().unwrap().join(FILE);
 }

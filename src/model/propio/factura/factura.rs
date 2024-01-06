@@ -1,6 +1,7 @@
 use rocket_db_pools::sqlx::{Error, Acquire, query};
 use rocket_db_pools::Connection;
 use crate::Db;
+use crate::model::propio::cliente::db_cliente_alta;
 use crate::types::Factura;
 
 use super::factura_head::db_factura_head_alta;
@@ -14,6 +15,7 @@ pub async fn db_factura_alta(
 	dbg!("Function call");
 	let mut trans = db.begin().await?;
 	
+	db_cliente_alta(&mut trans, &factura.cliente).await?;
 	db_factura_head_alta(&mut trans, factura).await?;
 
 	for i in &factura.productos {
@@ -34,13 +36,15 @@ pub async fn db_factura_set_cae (
 	const QRY:&str = 
 		"update factura set 
 		cae = $2, 
-		venc_cae = $3
+		venc_cae = $3,
+		numero = $4
 		where id_factura = $1";
 
 	let qry = query(QRY)
 			/* 1*/.bind(&factura.id_factura)
 			/* 2*/.bind(factura.cae)
 			/* 3*/.bind(factura.venc_cae)
+			/* 4*/.bind(factura.numero)
 		;
 		
 	qry.execute(&mut ***db).await?;

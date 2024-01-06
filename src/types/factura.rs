@@ -4,6 +4,8 @@ use crate::types::factura_producto::FacturaProduct;
 use crate::types::cliente::Cliente;
 use crate::aux_func::time_serde;
 
+use super::MedioPago;
+
 #[derive(Deserialize, Debug, Serialize)]
 #[serde(crate = "rocket::serde")]
 pub struct Factura {
@@ -21,7 +23,7 @@ pub struct Factura {
 	pub cae					:i64,
 	#[serde(with = "time_serde", default= "_default_dt")]
 	pub venc_cae		:DateTime<Utc>,
-	pub id_medio_pago	:i32,
+	pub medio_pago	:MedioPago,
 	pub productos   :Vec<FacturaProduct>
 }
 

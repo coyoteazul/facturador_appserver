@@ -3,6 +3,7 @@ use reqwest::{Client, Error};
 use rocket_db_pools::Connection;
 use yaserde_derive::{YaSerialize,YaDeserialize};
 use yaserde;
+use crate::model::afip::wsfev1::fe_comp_ultimo_autorizado;
 use crate::model::propio::factura::db_factura_set_cae;
 use crate::{Db, CONF};
 use crate::aux_func::time_serde::date_to_yyyymmdd;
@@ -18,9 +19,12 @@ pub async fn afip_fe_cae_solicitar(
 	req_cli: &Client,
 	factura: &mut Factura,
 	db: &mut Connection<Db>
-) -> Result<(bool,String), Error>{
+) -> Result<(bool,Vec::<String>), Error>{
 	dbg!("Function call");
 	let url = if CONF.is_prd() {WSFEV1_PRD} else {WSFEV1_VAL};
+	let mut es_ok = false; //Se cambia si sale ok
+	let mut msg = Vec::<String>::new();
+	
 
 	match afip_signin(req_cli, "wsfe",db).await {
 		Ok(auth) => {
@@ -31,65 +35,99 @@ pub async fn afip_fe_cae_solicitar(
 			let _ = db_factura_transmision(db, factura.id_factura,Some(id_trans), RESPUESTA, &respuesta).await;
 
 			if respuesta.contains("<soap:Fault>") {
-				return Ok((false,respuesta));
-			}
-			let body = get_xml_tag(&respuesta, "soap:Body")
-			.replace("xmlns=\"http://ar.gov.afip.dif.FEV1/\"", "");
+				msg.push(respuesta);
+			} else {
+				let body = get_xml_tag(&respuesta, "soap:Body")
+				.replace("xmlns=\"http://ar.gov.afip.dif.FEV1/\"", "");
 
-			let parsed:Result<FecaesolicitarResponse, String> = 
-				yaserde::de::from_str(&body).map_err(|e| {
-					return format!("Deserialization error: {:?}", e);
-				});
+				let parsed:Result<FecaesolicitarResponse, String> = 
+					yaserde::de::from_str(&body).map_err(|e| {
+						return format!("Deserialization error: {:?}", e);
+					});
 
-			match parsed {
-				Ok(a) => {
-					dbg!("parsed ok:",&a,body);
-					let result = a.fecae_solicitar_result.unwrap();
+				match parsed {
+					Ok(a) => {
+						dbg!("parsed ok:",&a,body);
+						let result = a.fecae_solicitar_result.unwrap();
 
-					match result.errors {
-						Some(afip_err) => {
-							let msg = format!("afip_err:{:?}",afip_err);
-							dbg!(&msg);
-							return Ok((false,msg));
+						match result.errors {
+							Some(afip_err) => {
+								for err in afip_err.err {
+									match err.code {
+										10016 => { //El numero de comprobante no se corresponde con el proximo a autorizar. Consultar metodo FECompUltimoAutorizado.
+											msg.push("10016".to_string())
+										}
+										_ => {
+											dbg!(&err.msg);
+											msg.push(format!("{:?}",err.msg));
+										}
+									}
+								}
+								//return Ok((false,msg));
+							}
+							None => {
+								dbg!("Tag de error");
+							}
 						}
-						None => {
-							let d2 = result.fe_det_resp.unwrap();
-							let d3: &FecaedetResponse = d2.fecae_det_response.get(0).unwrap();
-							match &d3.fedet_response.resultado {
-								Some(resultado) => {
-									if resultado == "A" {
+
+						let d2 = result.fe_det_resp.unwrap();
+						let d3: &FecaedetResponse = d2.fecae_det_response.get(0).unwrap();
+						match &d3.resultado {
+							Some(resultado) => {
+								match resultado.as_str() {
+									"A" => {
+										es_ok = true;
 										let venci_str = d3.cae_fch_vto.as_ref().unwrap();
 										let venci = NaiveDate::parse_from_str(&venci_str, "%Y%m%d").unwrap().and_hms_opt(0, 0, 0).unwrap().and_local_timezone(Local).single().unwrap().naive_utc().and_utc();
 										factura.cae = d3.cae.as_ref().unwrap().parse().unwrap();
 										factura.venc_cae = venci;
 										let _ = db_factura_set_cae(db, factura).await;
 									}
-								}
-								None => {
-									let msg = "Se recibio respuesta de afip pero no se encontro el tag 'resultado'".to_string();
-									dbg!(&msg);
-									return Ok((false, msg));
+									"R" => {
+										match &d3.observaciones {
+											Some(arr_of_obs) => {
+												for obs in &arr_of_obs.obs {
+													match obs.code {
+														10016 => { //El numero de comprobante no se corresponde con el proximo a autorizar. Consultar metodo FECompUltimoAutorizado.
+															msg.push("10016".to_string())
+														}
+														_ => {
+															msg.push(format!("{:?}",obs));
+														}
+													}
+												}
+											}
+											None => {
+												
+											}
+										}
+									}
+									_=> {
+										let msg = "Se recibio un resultado que no es ni A ni R".to_string();
+										dbg!(&msg);
+									}
 								}
 							}
+							None => {
+								msg.push("Se recibio respuesta de afip pero no se encontro el tag 'resultado'".to_string());
+								dbg!(&msg);							
+							}
 						}
-					}			
-				}
-				Err(e) => {
-					dbg!(&e);
-					return Ok((false,e));
-				}
-
-			}
-
-			return Ok((true,"".to_string()));
+					}
+					Err(e) => {
+						dbg!(&e);
+						msg.push(e);
+					}
+				}	
+			}		
 		}
 		Err(e) => {
 			dbg!(&e);
-			return Ok((false,e));
+			msg.push(e);
 		}
 	};
 	
-	
+	return Ok((es_ok, msg));
 }
 
 fn factura_to_soap(
@@ -146,10 +184,10 @@ fn factura_to_soap(
 	.split_at(SOAP_HEAD_SIZE).1.to_string();
 
 
-	return format!(
-		"<soap:Envelope 
-			xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" 
-			xmlns:ar=\"http://ar.gov.afip.dif.FEV1/\">
+	return format!(r#"
+	<soap:Envelope 
+			xmlns:soap="http://www.w3.org/2003/05/soap-envelope" 
+			xmlns:ar="http://ar.gov.afip.dif.FEV1/">
 			<soap:Header/>
 			<soap:Body>
 			<ar:FECAESolicitar>
@@ -157,7 +195,7 @@ fn factura_to_soap(
 				{factura_str}
 			</ar:FECAESolicitar>	
 			</soap:Body>
-			</soap:Envelope>"
+			</soap:Envelope>"#
 		);
 }
 
@@ -538,22 +576,6 @@ struct ArrayOfFECAEDetResponse {
 	prefix = "ar: ",
 )]
 struct FecaedetResponse {
-	#[yaserde(flatten, default)]
-	pub fedet_response: FedetResponse, 
-#[yaserde(prefix = "xsi", rename="type", attribute)]
-pub xsi_type: String,
-	#[yaserde(rename = "CAE", prefix = "ar", default)]
-	pub cae: Option<String>, 
-	#[yaserde(rename = "CAEFchVto", prefix = "ar", default)]
-	pub cae_fch_vto: Option<String>, 
-}
-#[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
-#[yaserde(
-	rename = "FEDetResponse",
-	namespace = "ar: http://ar.gov.afip.dif.FEV1/",
-	prefix = "ar: ",
-)]
-struct FedetResponse {
 	#[yaserde(rename = "Concepto", prefix = "ar", default)]
 	pub concepto: i32, 
 	#[yaserde(rename = "DocTipo", prefix = "ar", default)]
@@ -569,7 +591,11 @@ struct FedetResponse {
 	#[yaserde(rename = "Resultado", prefix = "ar", default)]
 	pub resultado: Option<String>, 
 	#[yaserde(rename = "Observaciones", prefix = "ar", default)]
-	pub observaciones: Option<ArrayOfObs>, 
+	pub observaciones: Option<ArrayOfObs>,
+	#[yaserde(rename = "CAE", prefix = "ar", default)]
+	pub cae: Option<String>, 
+	#[yaserde(rename = "CAEFchVto", prefix = "ar", default)]
+	pub cae_fch_vto: Option<String>, 
 }
 #[derive(Debug, Default, YaSerialize, YaDeserialize, Clone)]
 #[yaserde(

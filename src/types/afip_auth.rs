@@ -16,7 +16,7 @@ impl AfipAuth {
 					<ar:Token>{}</ar:Token>
 					<ar:Sign>{}</ar:Sign>
 					<ar:Cuit>{}</ar:Cuit>
-				</ar:Auth>", token, sign, CONF.afip_com.cuit).to_string(),
+				</ar:Auth>", token, sign, CONF.afip_com.cuit.to_string()).to_string(),
 			expir
 		}
 	}

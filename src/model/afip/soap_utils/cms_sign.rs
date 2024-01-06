@@ -42,9 +42,9 @@ fn my_cert_load() ->X509 {
 	let cert_path = cert_filepath();
 	dbg!("{}",cert_path.display());
 
-	let mut buf:[u8;1212] = [0; 1212];
+	let mut buf = Vec::new();
 	let mut file = File::open(cert_path).unwrap();	
-	let _ = file.read_exact(&mut buf).unwrap();
+	let _ = file.read_to_end(&mut buf);
 	
 	return X509::from_pem(&buf).expect("failed to load my_cert");
 }

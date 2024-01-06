@@ -2,6 +2,7 @@ use rocket_db_pools::sqlx::Error;
 use rocket_db_pools::sqlx::postgres::PgQueryResult;
 use rocket_db_pools::{Connection, sqlx};
 use rocket_db_pools::sqlx::Row;
+use sqlx::{Transaction, Postgres};
 use crate::Db;
 use crate::types::Cliente;
 
@@ -21,16 +22,26 @@ pub async fn db_cliente_get(
 }
 
 pub async fn db_cliente_alta(
-	db: &mut Connection<Db>, cliente:Cliente 
-) -> Result<PgQueryResult, Error> {
-	let qry = 
-		sqlx::query("insert into cliente (tipo_doc_cod, num_doc, nombre) 
-			Values($1,$2,$3)")
-		.bind(cliente.tipo_doc)
-		.bind(cliente.num_doc)
-		.bind(cliente.nombre);
-	
-	let retorno = qry.execute(&mut ***db).await;
-	dbg!("db_cliente_alta:{:?}", &retorno);
-	return retorno
+	trans: &mut Transaction<'_, Postgres>, 
+	cliente:&Cliente
+) -> Result<bool, Error> {
+	dbg!("Function call");
+
+	if cliente.tipo_doc == 0 {
+		return Ok(true);
+	}
+
+	const QRY:&str = 
+		"insert into cliente 
+			(tipo_doc_cod, num_doc, nombre) Values
+			($1          , $2     , $3    )
+			on conflict (tipo_doc_cod, num_doc) do nothing ";
+
+	let qry = sqlx::query(QRY)
+		/* 1*/.bind(cliente.tipo_doc)
+		/* 2*/.bind(cliente.num_doc)
+		/* 3*/.bind(&cliente.nombre);
+		
+	let _ = qry.execute(&mut **trans).await?;
+	return Ok(true);
 }

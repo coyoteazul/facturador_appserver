@@ -8,15 +8,15 @@ pub async fn afip_dummy(
 	req_cli: &Client
 ) -> Result<FEDummyResult, reqwest::Error>{
 	let url = if CONF.is_prd() {WSFEV1_PRD} else {WSFEV1_VAL};
-  const XML_BODY:&str = 
-	"<soap:Envelope 
-			xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" 
-			xmlns:ar=\"http://ar.gov.afip.dif.FEV1/\">
+  const XML_BODY:&str = r#"
+	<soap:Envelope 
+			xmlns:soap="http://www.w3.org/2003/05/soap-envelope" 
+			xmlns:ar="http://ar.gov.afip.dif.FEV1/">
 		<soap:Header/>
 		<soap:Body>
 			<ar:FEDummy/>
 		</soap:Body>
-	</soap:Envelope>";
+	</soap:Envelope>"#;
 
 
 	let respuesta = afip_post(req_cli, url,XML_BODY.to_string()).await?;

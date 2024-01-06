@@ -7,7 +7,8 @@ pub async fn afip_post(
 	
 	dbg!("afip post url:", &url);
 	dbg!("afip post soap_msg:", &soap_msg);
-
+	
+	let soap_msg = soap_msg.trim().to_string();
 	let request = req_cli.post(url)
 	.header(CONTENT_TYPE, "application/soap+xml")
 	.body(soap_msg)

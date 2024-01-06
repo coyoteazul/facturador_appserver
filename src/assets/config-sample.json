@@ -8,7 +8,8 @@
 		"direccion":"dir"
 	},
 	"entorno": {
-		"is_prd": false
+		"is_prd": false,
+		"impresora": "\\\\DESKTOP-8AS9R1U\\impre_termica"
 	},
 	"database":{
 		"url":"postgresql://postgres:postgres@localhost:5432/postgres"

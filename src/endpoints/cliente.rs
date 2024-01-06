@@ -29,32 +29,3 @@ pub struct ClienteGet {
 	pub tipo_doc:i32,
 	pub num_doc:i64
 }
-
-#[post("/cliente", data = "<input>")]
-pub async fn cliente_alta(
-	mut db: Connection<Db>, input: Json<Cliente>
-) -> Status { 
-	dbg!("cliente_alta input:", &input);
-	let res = db_cliente_alta(&mut db, input.0).await;
-	dbg!(&res);
-
-	match res {
-		Ok(msg) => {
-			dbg!("cliente_alta ok:", msg);
-			return Status::Ok;
-		}
-		Err(e) => {
-			let a = e.as_database_error().unwrap();
-			dbg!("cliente_alta err:", a);
-			match a.kind() {
-				UniqueViolation =>{
-					return Status::Conflict;
-				}
-				_ => {
-					return Status::InternalServerError;
-				}
-			}
-		}
-	}
-	//return input;
-}

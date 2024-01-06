@@ -5,7 +5,7 @@ use chrono::{Duration, DateTime, Date, Utc};
 use reqwest::{header::CONTENT_TYPE, Client};
 use rocket_db_pools::Connection;
 use lazy_static::lazy_static;
-use crate::{model::{afip::soap_utils::{arma_login_ticket_request::arma_login_ticket_request_xml, cms_sign::sign_with_cms, get_xml_tag::get_xml_tag, soap_fault::SoapFault}, propio::afip_sign_cache::{db_afip_sign_cache_alta, db_afip_sign_cache_get}}, CONF, types::AfipAuth, Db};
+use crate::{model::{afip::{soap_utils::{arma_login_ticket_request::arma_login_ticket_request_xml, cms_sign::sign_with_cms, get_xml_tag::get_xml_tag, soap_fault::SoapFault}, afip_sign_cache::{db_afip_sign_cache_get, db_afip_sign_cache_alta}}}, CONF, types::AfipAuth, Db};
 
 lazy_static! {
 	//static ref CACHE: Mutex<HashMap<String, AfipAuth>> = Mutex::new(HashMap::new());
@@ -72,17 +72,17 @@ async fn login_online(
 		if CONF.is_prd() {"wsaa"} else {"wsaahomo"}
 	);
 	
-	let body = format!(
-	"<soapenv:Envelope 
-	xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" 
-	xmlns:wsaa=\"http://wsaa.view.sua.dvadac.desein.afip.gov\">
+	let body = format!(r#"
+	<soapenv:Envelope 
+	xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" 
+	xmlns:wsaa="http://wsaa.view.sua.dvadac.desein.afip.gov">
 		<soapenv:Header/>
 		<soapenv:Body>
 			<wsaa:loginCms>
 					<wsaa:in0>{signed_req}</wsaa:in0>
 			</wsaa:loginCms>
 		</soapenv:Body>
-	</soapenv:Envelope>");
+	</soapenv:Envelope>"#);
 	dbg!(&body);
 
 	let request = req_cli.post(url)

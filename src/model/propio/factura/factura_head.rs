@@ -25,7 +25,7 @@ pub async fn db_factura_head_alta(
 			/* 4*/.bind(factura.tipo_fac)
 			/* 5*/.bind(factura.punto_venta)
 			/* 6*/.bind(factura.fecha)
-			/* 7*/.bind(factura.id_medio_pago)
+			/* 7*/.bind(factura.medio_pago.id_medio_pago)
 		;
 		
 	let row = qry.fetch_one(&mut **trans).await?;

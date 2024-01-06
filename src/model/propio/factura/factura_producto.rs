@@ -13,7 +13,7 @@ pub async fn db_factura_producto_alta(
 	let qry = query(QRY)
 			/* 1*/.bind(id_factura)
 			/* 2*/.bind(producto.item_num)
-			/* 3*/.bind(producto.id_producto)
+			/* 3*/.bind(producto.producto.id_producto)
 			/* 4*/.bind(producto.cantidad)
 			/* 5*/.bind(producto.valor)
 		;
