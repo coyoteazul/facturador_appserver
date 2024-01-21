@@ -4,6 +4,7 @@ use yaserde;
 
 use crate::{model::afip::{soap_utils::{afip_post, get_xml_tag}, wsfev1::constants::*}, CONF};
 
+#[allow(dead_code)]
 pub async fn afip_dummy(
 	req_cli: &Client
 ) -> Result<FEDummyResult, reqwest::Error>{

@@ -1,7 +1,7 @@
 use crate::{model::afip::soap_utils::{afip_post, get_xml_tag, afip_signin}, CONF};
 use rocket_db_pools::Connection;
 use crate::Db;
-use reqwest::{Client, Error};
+use reqwest::{Client};
 use yaserde_derive::{YaSerialize,YaDeserialize};
 
 use super::constants::{WSFEV1_PRD, WSFEV1_VAL};

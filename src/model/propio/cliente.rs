@@ -1,5 +1,5 @@
 use rocket_db_pools::sqlx::Error;
-use rocket_db_pools::sqlx::postgres::PgQueryResult;
+
 use rocket_db_pools::{Connection, sqlx};
 use rocket_db_pools::sqlx::Row;
 use sqlx::{Transaction, Postgres};

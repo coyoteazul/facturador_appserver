@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
+
 use rocket_db_pools::{Connection, sqlx};
-use rocket_db_pools::sqlx::{Row, Postgres};
+use rocket_db_pools::sqlx::{Row};
 use crate::Db;
-use crate::aux_func::time_serde::utc_from_ts_str;
+
 use crate::types::AfipAuth;
 
 pub async fn db_afip_sign_cache_get(
@@ -48,7 +48,7 @@ pub async fn db_afip_sign_cache_alta(
 		.bind(i.0)
 		.bind(&i.1.xml);
 
-		qry.execute(&mut ***db).await;
+		qry.execute(&mut ***db).await.unwrap();
 	}
 	
 }

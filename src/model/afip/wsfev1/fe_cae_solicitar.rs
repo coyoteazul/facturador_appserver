@@ -1,9 +1,9 @@
-use chrono::{Utc, NaiveDate, Local};
+use chrono::{NaiveDate, Local};
 use reqwest::{Client, Error};
 use rocket_db_pools::Connection;
 use yaserde_derive::{YaSerialize,YaDeserialize};
 use yaserde;
-use crate::model::afip::wsfev1::fe_comp_ultimo_autorizado;
+
 use crate::model::propio::factura::db_factura_set_cae;
 use crate::{Db, CONF};
 use crate::aux_func::time_serde::date_to_yyyymmdd;

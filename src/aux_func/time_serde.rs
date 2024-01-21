@@ -46,14 +46,4 @@ pub fn date_to_yyyymmdd(
 	return format!("{}",fecha.with_timezone(&Local).format("%Y%m%d"));
 }
 
-pub fn utc_from_ts_str(txt: &str
-)-> DateTime<Utc> {
-	let x = DateTime::parse_from_str(txt, FORMAT).unwrap();
-	return x.with_timezone(&Utc);
-}
 
-pub fn local_from_ts_str(txt: &str
-)-> DateTime<Local> {
-	let x = DateTime::parse_from_str(txt, FORMAT).unwrap();
-	return x.with_timezone(&Local);
-}

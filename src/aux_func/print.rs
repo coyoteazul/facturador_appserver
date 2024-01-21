@@ -1,6 +1,6 @@
 use std::process::Command;
 use chrono::Local;
-use num_format::{Locale, ToFormattedString};
+
 use escposify::{img::Image, printer::Printer};
 use image::Luma;
 use qrcode::QrCode;
@@ -33,7 +33,7 @@ pub fn print_factura(factura:&Factura) {
 
 	let source_path = &device_file.path().display().to_string();
 	let destination_path = &CONF.entorno.impresora;
-	let status = Command::new("cmd")
+	let _status = Command::new("cmd")
 			.args(&["/C", "copy", source_path, destination_path])
 			.status()
 			.expect("Failed to execute command");
@@ -90,7 +90,7 @@ fn text_make(factura: &Factura
 	let mut ret = Vec::<String>::with_capacity(24+&factura.productos.len());	
 	let AfipCom{direccion,inicio_actividad,iva_responsable,nombre_fantasia, cuit, iibb_num}	= &CONF.afip_com;
 	let Factura{venc_cae,cae, fecha, punto_venta, numero,..}	= factura;
-	let Cliente{nombre, num_doc, tipo_doc} = &factura.cliente;
+	let Cliente{nombre, num_doc, tipo_doc: _} = &factura.cliente;
 	let cuit_str = cuit.to_string();
 	let ib_str = iibb_num.to_string();
 	let cli_doc_str = num_doc.to_string();
