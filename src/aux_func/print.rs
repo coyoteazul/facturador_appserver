@@ -39,7 +39,6 @@ pub fn print_factura(factura:&Factura) {
 			.expect("Failed to execute command");
 }
 
-
 fn qr_make(factura: &Factura) -> Image {
 	let json_fac = FacJson {
     ver: 				1,
@@ -67,6 +66,7 @@ fn qr_make(factura: &Factura) -> Image {
 	.resize(400, 400, image::imageops::FilterType::Nearest));
 }
 
+#[allow(non_snake_case)]
 #[derive( Serialize, Debug)]
 #[serde(crate = "rocket::serde")]
 struct FacJson {

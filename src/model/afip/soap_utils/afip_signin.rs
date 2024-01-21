@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Add};
 use rocket::tokio::sync::RwLock;
 
-use chrono::{Duration, DateTime, Date, Utc};
+use chrono::{Duration, DateTime,  Utc};
 use reqwest::{header::CONTENT_TYPE, Client};
 use rocket_db_pools::Connection;
 use lazy_static::lazy_static;

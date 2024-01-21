@@ -1,6 +1,5 @@
 use rocket_db_pools::sqlx::{query, Error, Transaction, Postgres, Row};
 use crate::types::Factura;
-const FORMAT: &'static str = "%Y-%m-%d %H:%M:%S%:z";
 
 /** Registra la factura en la base de datos y actualiza 
  * el id_factura y numero en el objeto factura
