@@ -9,14 +9,14 @@ pub fn arma_login_ticket_request_xml(
 	let uniqueid = req_date.timestamp().to_string();
 
 	let login_ticket_request_xml = format!(
-	"<loginTicketRequest version=\"1.0\">
+	r#"<loginTicketRequest version="1.0">
 		<header>
 			<uniqueId>{uniqueid}</uniqueId>
 			<generationTime>{gen_time}</generationTime>
 			<expirationTime>{exp_time}</expirationTime>
 		</header>
 		<service>{webservice}</service>
-	</loginTicketRequest>"
+	</loginTicketRequest>"#
 	);
 	return login_ticket_request_xml;
 }

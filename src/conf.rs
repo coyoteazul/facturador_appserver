@@ -20,10 +20,12 @@ impl Conf {
 			let setting:Conf = builder.try_deserialize().unwrap();
 
 			let db_url = format!("{}{}{}",
-			 "{my_postgres_db={url=\"",setting.database.url,"\"}}");
-
+			 r#"{my_postgres_db={url=""#,setting.database.url,r#""}}"#);
 			std::env::set_var("ROCKET_DATABASES", db_url);
 			dbg!("ROCKET_DATABASES: {}", std::env::var("ROCKET_DATABASES").unwrap());
+
+			std::env::set_var("ROCKET_PORT", setting.server.port.to_string());
+
 			return setting;
 	}
 	pub fn is_prd(&self) -> bool {

@@ -19,7 +19,7 @@ pub async fn fe_comp_ultimo_autorizado (
 			match respuesta {
 				Ok(res) => {
 					let body = get_xml_tag(&res, "soap:Body")
-						.replace("xmlns=\"http://ar.gov.afip.dif.FEV1/\"", "");
+						.replace(r#"xmlns="http://ar.gov.afip.dif.FEV1/""#, "");
 
 					let parsed:Result<FecompUltimoAutorizadoResponse, String> = 
 						yaserde::de::from_str(&body).map_err(|e| {

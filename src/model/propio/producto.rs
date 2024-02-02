@@ -29,3 +29,34 @@ pub async fn db_producto_get_all(
 
 	return Ok(retorno);
 }
+
+pub async fn db_producto_get(
+	db: &mut Connection<Db>,
+	id_producto:i32
+) -> Result<Vec<Producto>, Error> {
+	const QRY:&str = 
+	"select p.*, pg.nombre as producto_grupo
+	from producto p
+	inner join producto_grupo pg
+	using (id_producto_grupo)
+	where id_producto = $1";
+
+	let rows = sqlx::query(QRY)
+	.bind(id_producto)
+	.fetch_all(&mut ***db)
+	.await.unwrap();
+	
+	let mut retorno:Vec<Producto> = Vec::<Producto>::with_capacity(rows.len()); 
+	for rec in rows {
+		retorno.push(Producto{
+			id_producto: 		rec.get("id_producto"),
+			nombre: 				rec.get("nombre"),
+			unidad_medida:	rec.get("unidad_medida"),
+			producto_grupo: rec.get("producto_grupo"),
+			precio: 				rec.get("precio")
+		})
+			
+	};
+
+	return Ok(retorno);
+}

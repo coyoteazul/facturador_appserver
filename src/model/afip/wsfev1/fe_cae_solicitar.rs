@@ -38,7 +38,7 @@ pub async fn afip_fe_cae_solicitar(
 				msg.push(respuesta);
 			} else {
 				let body = get_xml_tag(&respuesta, "soap:Body")
-				.replace("xmlns=\"http://ar.gov.afip.dif.FEV1/\"", "");
+				.replace(r#"xmlns="http://ar.gov.afip.dif.FEV1/""#, "");
 
 				let parsed:Result<FecaesolicitarResponse, String> = 
 					yaserde::de::from_str(&body).map_err(|e| {
@@ -134,7 +134,7 @@ fn factura_to_soap(
 	factura: &Factura, auth:String
 ) -> String {
 	dbg!("Function call");
-	const SOAP_HEAD_SIZE:usize = "<?xml version=\"1.0\" encoding=\"utf-8\"?>".len();
+	const SOAP_HEAD_SIZE:usize = r#"<?xml version="1.0" encoding="utf-8"?>"#.len();
 	let body = Fecaerequest{
 		fe_cab_req: Some(FecaecabRequest{
 				fecab_request: FecabRequest {

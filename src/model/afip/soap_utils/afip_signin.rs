@@ -5,7 +5,7 @@ use chrono::{Duration, DateTime,  Utc};
 use reqwest::{header::CONTENT_TYPE, Client};
 use rocket_db_pools::Connection;
 use lazy_static::lazy_static;
-use crate::{model::{afip::{soap_utils::{arma_login_ticket_request::arma_login_ticket_request_xml, cms_sign::sign_with_cms, get_xml_tag::get_xml_tag, soap_fault::SoapFault}, afip_sign_cache::{db_afip_sign_cache_get, db_afip_sign_cache_alta}}}, CONF, types::AfipAuth, Db};
+use crate::{model::afip::{soap_utils::{arma_login_ticket_request::arma_login_ticket_request_xml, cms_sign::sign_with_cms, get_xml_tag::get_xml_tag, soap_fault::SoapFault}, afip_sign_cache::{db_afip_sign_cache_get, db_afip_sign_cache_alta}}, CONF, types::AfipAuth, Db};
 
 lazy_static! {
 	//static ref CACHE: Mutex<HashMap<String, AfipAuth>> = Mutex::new(HashMap::new());
@@ -33,10 +33,7 @@ async fn login_desde_cache(
 	service:&str
 ) -> Option<String> {
 	dbg!("Function call");
-	let cache_len = 'bloque: {
-		let cache_ref = &*CACHE.read().await;
-		break 'bloque cache_ref.len();
-	};
+	let cache_len = (&*CACHE.read().await).len();
 	
 	/*Buscar cache en base de datos */ 
 	if cache_len == 0 {
